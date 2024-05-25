@@ -1,0 +1,18 @@
+[flake8]
+max-line-length = 88
+max-doc-length = 80
+
+ignore =
+	# E203 states no space before a colon.
+	# There is a known bug and black does the correct thing.
+	E203
+	# W503 states that line breaks should occur after the binary operator.
+	# This is out of date and black does the correct thing.
+	W503
+exclude =
+	scripts
+	bus_planning.egg-info
+	params
+	bus_planning/optimize/longest_path.py
+
+

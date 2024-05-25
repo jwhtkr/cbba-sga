@@ -1,0 +1,14 @@
+**/*venv
+**/.vscode
+**/*.egg-info
+**/__pycache__
+*.png
+*.svg
+*.pkl
+**/*.log
+**/journal_data
+**/plots
+**/*.csv
+**/journal_data
+**/.dmypy.json
+**/.hypothesis

@@ -1,0 +1,57 @@
+[project]
+name = "cbba_sga"
+version = "0.0.1"
+dependencies = ["gurobipy>=11", "pydantic", "PyYaml", "matplotlib"]
+authors = [{ name = "Justin Whitaker", email = "justinwhtkr@gmail.com" }]
+description = "Implementations of CBBA and SGA"
+readme = "README.md"
+requires-python = ">=3.8"
+license = { text = "MIT License" }
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+
+[project.urls]
+Homepage = "https://gitlab.com/utahstate/droge-robotics/general_research_code/cbba-sga#content-body"
+Issues = "https://gitlab.com/utahstate/droge-robotics/general_research_code/cbba-sga/-/issues"
+
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.isort]
+profile = "black"
+treat_comments_as_code = ["# import matplotlib.pyplot as plt"]
+src_paths = ["src", "test"]
+
+[tool.mypy]
+python_version = "3.8"
+warn_no_return = true
+warn_redundant_casts = true
+warn_return_any = true
+warn_unused_configs = true
+warn_unused_ignores = true
+warn_unreachable = true
+disallow_any_generics = true
+disallow_incomplete_defs = true
+disallow_untyped_decorators = true
+disallow_untyped_defs = true
+allow_redefinition = true
+cache_fine_grained = true
+color_output = true
+ignore_missing_imports = true
+pretty = true
+show_absolute_path = true
+strict_equality = true
+show_error_codes = true
+
+[tool.pydocstyle]
+convention = "google"
+
+[tool.pytest.ini_options]
+minversion = "6.0"
+testpaths = ["tests"]
+norecursedirs = ["scripts"]
