@@ -2,10 +2,14 @@
 
 import copy
 import dataclasses
+import logging
 import multiprocessing as mp
 import typing
 
 from cbba_sga import task
+
+
+logger = logging.getLogger(__name__)
 
 
 DataT = typing.TypeVar("DataT", covariant=True)
@@ -23,15 +27,48 @@ class Bid(typing.Generic[DataT]):
 
 # Below: Disable too-many-instance-attributes (R0902)
 class Agent(typing.Generic[DataT, CommsT]):  # pylint: disable=R0902
-    """Represent an agent in CBBA/SGA."""
+    """Represent an agent in CBBA/SGA.
+
+    Attributes:
+        id: The ID of the agent.
+        in_queue: The incoming message queue for the agent. Set to None if only
+            using SGA. Set to a multiprocessing Queue (from multiprocessing
+            Manager) for using with CBBA.
+        out_queues: The outgoing message queues for the agent. Set to empty for
+            SGA and a list of multiprocessing Queues (from a multiprocessing
+            Manager) for using with CBBA.
+        winning_assignments: The list of tasks that track the agent's local (if
+            CBBA) knowledge of the assignment of tasks to agents and the related
+            score and other data.
+        curr_bids: The agent's current bids for all the tasks.
+        bundle: The list of tasks assigned to the agent in assignment order.
+        path: The list of tasks assigned to the agent in performed order.
+        timestamps: The list of most recent times this agent has received
+            information originating from each other agent.
+        bids_are_dirty: A boolean indicating that the bids of this agent need
+            to be updated to reflect an update in other information of this
+            agent.
+    """
 
     def __init__(
         self,
         id_: str,
-        in_queue: "mp.Queue[CommsT]",
+        in_queue: "typing.Optional[mp.Queue[CommsT]]",
         out_queues: typing.List["mp.Queue[CommsT]"],
         tasks: typing.Sequence[task.Task[DataT]],
     ) -> None:
+        """Initialize.
+
+        Args:
+            id: The ID of the agent.
+            in_queue: The incoming message queue for the agent. Set to None if
+                only using SGA. Set to a multiprocessing Queue for using with
+                CBBA.
+            out_queues: The outgoing message queues for the agent. Set to an
+                empty list for SGA and a list of multiprocessing Queues for
+                using with CBBA.
+            tasks: The list of tasks that of the problem.
+        """
         self.id = id_
         self.in_queue = in_queue
         self.out_queues = out_queues
@@ -40,7 +77,7 @@ class Agent(typing.Generic[DataT, CommsT]):  # pylint: disable=R0902
         self.bundle: typing.List[task.Task[DataT]] = []
         self.path: typing.List[task.Task[DataT]] = []
         self.timestamps: typing.List[float] = []
-        self.scores_are_dirty: bool = False
+        self.bids_are_dirty: bool = False
 
     @property
     def done(self) -> bool:
@@ -54,16 +91,18 @@ class Agent(typing.Generic[DataT, CommsT]):  # pylint: disable=R0902
                 "An attempt was made to add a task to an agent that is done."
             )
 
-        bid = self.task_bid(task_)
+        bid, my_task = self.task_bid(task_)
         if bid is None:
             raise ValueError(
                 f"Task {task_.id} is not a valid task to add to agent "
                 f"{self.id}'s bundle at this time."
             )
-        self.path.insert(bid.path_idx, task_)
-        self.bundle.append(task_)
+        logger.debug("Adding task %s to agent %s's bundle and path.", task_.id, self.id)
+        my_task.assign_to(self.id, bid.value, bid.data)
+        self.path.insert(bid.path_idx, my_task)
+        self.bundle.append(my_task)
 
-        self.scores_are_dirty = True
+        self.bids_are_dirty = True
 
     def initialize_bids(self) -> None:
         """Initialize the bids for all of the tasks."""
@@ -71,10 +110,11 @@ class Agent(typing.Generic[DataT, CommsT]):  # pylint: disable=R0902
 
     def update_bids(self, update_tasks: typing.List[task.Task[DataT]]) -> None:
         """Update the bids of this agent based on the updated tasks."""
+        logger.debug("Updating bids of agent %s.", self.id)
         self._update_bids_task_assignments(update_tasks)
-        if self.scores_are_dirty:
+        if self.bids_are_dirty:
             self._update_bids_bundle_update()
-            self.scores_are_dirty = False
+            self.bids_are_dirty = False
 
     def _update_bids_bundle_update(self) -> None:
         """Update the bids based on a new bundle."""
@@ -86,11 +126,13 @@ class Agent(typing.Generic[DataT, CommsT]):  # pylint: disable=R0902
         """Update the bids based on task assignments being updated."""
         raise NotImplementedError
 
-    def task_bid(self, task_: task.Task[DataT]) -> typing.Optional[Bid[DataT]]:
+    def task_bid(
+        self, task_: task.Task[DataT]
+    ) -> typing.Tuple[typing.Optional[Bid[DataT]], task.Task[DataT]]:
         """Retrieve the bid for a task."""
         for _bid, _task in zip(self.curr_bids, self.winning_assignments):
             if _task.id == task_.id:
-                return _bid
+                return _bid, _task
         raise RuntimeError(f"Task {task_.id} could not be found for agent {self.id}")
 
     def __str__(self) -> str:

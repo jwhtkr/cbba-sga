@@ -1,7 +1,6 @@
 """This example is essentially the one from the CBBA paper."""
 
 import math
-import multiprocessing as mp
 import typing
 from cbba_sga import agent, sga, task
 
@@ -26,7 +25,7 @@ class PositionAgent(agent.Agent[None, None]):
         lambda_: float,
         max_tasks: int,
     ) -> None:
-        super().__init__(id_, mp.Queue(), [], tasks)
+        super().__init__(id_, None, [], tasks)
         self.position = position
         self.lambda_ = lambda_
         self.max_tasks = max_tasks
@@ -109,13 +108,22 @@ def calc_path_distances(
 
 
 if __name__ == "__main__":
+    import logging
+    import os
     import random
     import matplotlib.pyplot as plt
     import time
 
     random.seed(42)
 
-    N = 5
+    logging.basicConfig(
+        level=logging.DEBUG, filename=f"{os.curdir}baseline.log", filemode="w"
+    )
+    logging.getLogger("PIL").setLevel(logging.WARNING)
+    logging.getLogger("matplotlib").setLevel(logging.WARNING)
+
+    N = 20
+    MP = False
 
     _tasks = [
         PositionTask(str(i), (random.uniform(-10, 10), random.uniform(-10, 10)))
@@ -135,8 +143,9 @@ if __name__ == "__main__":
     # _agents = [PositionAgent("1", _tasks, (0, 0), 0.5, 3)]
 
     sga_start = time.perf_counter()
-    sga.sga(_agents, _tasks, sga.SgaConfig(max_iterations=1000))
+    sga.sga(_agents, _tasks, sga.SgaConfig(max_iterations=1000, multiprocessing=MP))
     sga_end = time.perf_counter()
+    logging.info("SGA time: %f", sga_end - sga_start)
     print(f"SGA time: {sga_end - sga_start}")
 
     plt.figure()
@@ -159,7 +168,8 @@ if __name__ == "__main__":
     plt.figure()
     _n_agents = [5, 10, 15, 20, 25, 30, 35, 40, 50, 60]
     _sga_times = [0.008, 0.05, 0.2, 0.5, 1.1, 2.1, 3.7, 6.9, 14.7, 29.7]
-    _coeffs = [0.0003, -0.0094, 0.1401, -0.5823]
+    # _coeffs = [0.0003, -0.0094, 0.1401, -0.5823]
+    _coeffs = [1.9e-6, 1.2e-5, 9.3e-4, -2.1e-2, 1.1e-1]
     _approx = [
         sum(coeff * val ** (len(_coeffs) - i - 1) for i, coeff in enumerate(_coeffs))
         for val in _n_agents
