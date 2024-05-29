@@ -165,18 +165,18 @@ if __name__ == "__main__":
         # for _bundle_position
         plt.plot(*zip(*_bundle_positions), ":", color=_color_cycle[i % 10], linewidth=2)
 
-    plt.figure()
-    _n_agents = [5, 10, 15, 20, 25, 30, 35, 40, 50, 60]
-    _sga_times = [0.008, 0.05, 0.2, 0.5, 1.1, 2.1, 3.7, 6.9, 14.7, 29.7]
-    # _coeffs = [0.0003, -0.0094, 0.1401, -0.5823]
-    _coeffs = [1.9e-6, 1.2e-5, 9.3e-4, -2.1e-2, 1.1e-1]
-    _approx = [
-        sum(coeff * val ** (len(_coeffs) - i - 1) for i, coeff in enumerate(_coeffs))
-        for val in _n_agents
-    ]
-    plt.plot(_n_agents, _sga_times)
-    plt.plot(
-        _n_agents,
-        _approx,
-    )
+    # plt.figure()
+    # _n_agents = [5, 10, 15, 20, 25, 30, 35, 40, 50, 60]
+    # _sga_times = [0.008, 0.05, 0.2, 0.5, 1.1, 2.1, 3.7, 6.9, 14.7, 29.7]
+    # # _coeffs = [0.0003, -0.0094, 0.1401, -0.5823]
+    # _coeffs = [1.9e-6, 1.2e-5, 9.3e-4, -2.1e-2, 1.1e-1]
+    # _approx = [
+    #     sum(coeff * val ** (len(_coeffs) - i - 1) for i, coeff in enumerate(_coeffs))
+    #     for val in _n_agents
+    # ]
+    # plt.plot(_n_agents, _sga_times)
+    # plt.plot(
+    #     _n_agents,
+    #     _approx,
+    # )
     plt.show()

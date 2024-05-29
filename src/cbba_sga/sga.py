@@ -23,13 +23,6 @@ T = typing.TypeVar("T")
 RT = typing.TypeVar("RT")
 
 
-def map_(
-    func: typing.Callable[[T], RT], iterable: typing.Iterable[T], _chunksize: int = 10
-) -> typing.Iterable[RT]:
-    """Wrap `map` to use chunksize (ignored) and be eager (match smart pool)."""
-    return map(func, iterable)
-
-
 def sga(
     agents: typing.Sequence[agent.Agent[_DataT, None]],
     tasks: typing.Sequence[task.Task[_DataT]],
@@ -37,24 +30,13 @@ def sga(
 ) -> None:
     """Assign tasks to agents using the SGA algorithm."""
     open_tasks = [task_ for task_ in tasks if task_.available]
-    for agent_ in agents:
-        agent_.initialize_bids()
-    _map: typing.Callable[
-        [
-            typing.Callable[
-                [typing.Tuple[agent.Agent[_DataT, None], task.Task[_DataT]]],
-                agent.Agent[_DataT, None],
-            ],
-            typing.Iterable[typing.Tuple[agent.Agent[_DataT, None], task.Task[_DataT]]],
-            int,
-        ],
-        typing.Iterable[agent.Agent[_DataT, None]],
-    ]
-    _map = map_
-    pool_ = None
-    if config_.multiprocessing:
-        pool_ = pool.SmartPool()
-        _map = pool_.imap
+    mp_pool = None if not config_.multiprocessing else pool.SmartPool()
+
+    if mp_pool is not None:
+        proxy_agents = mp_pool.map(initialize_bids, agents)
+        _update_agents_from_proxies(agents, proxy_agents)
+    else:
+        list(map(initialize_bids, agents))
 
     for _i in range(config_.max_iterations):
         logger.debug("SGA iteration %s", _i)
@@ -65,15 +47,16 @@ def sga(
         selected_task.assign_to(selected_agent.id, score, assignment_data)
         selected_agent.add_to_bundle(selected_task)
 
-        proxy_agents = list(
-            _map(
+        update_scores_zip = zip(agents, itertools.repeat(selected_task))
+        if mp_pool is not None:
+            proxy_agents = mp_pool.imap(
                 update_scores,
-                zip(agents, itertools.repeat(selected_task)),
+                update_scores_zip,
                 config_.chunk_size,
             )
-        )
-        if config_.multiprocessing:
             _update_agents_from_proxies(agents, proxy_agents)
+        else:
+            list(map(update_scores, update_scores_zip))
 
         if not selected_task.available:
             logger.debug("Removing task %s from the open tasks.", selected_task.id)
@@ -85,9 +68,9 @@ def sga(
             logger.debug("No more available tasks. Stopping SGA.")
             break
 
-    if pool_ is not None:
+    if mp_pool is not None:
         logger.debug("Stopping the multiprocessing pool.")
-        pool_.stop()
+        mp_pool.stop()
 
 
 def select_best_assignment(
@@ -131,9 +114,15 @@ def update_scores(
     return agent_
 
 
+def initialize_bids(agent_: agent.Agent[_DataT, None]) -> agent.Agent[_DataT, None]:
+    """Initialize the agents bids (wraps agent function for pickling)."""
+    agent_.initialize_bids()
+    return agent_
+
+
 def _update_agents_from_proxies(
     agents: typing.Sequence[agent.Agent[_DataT, None]],
-    proxies: typing.Sequence[agent.Agent[_DataT, None]],
+    proxies: typing.Iterable[agent.Agent[_DataT, None]],
 ) -> None:
     """Update the agents to match the proxies from multiprocessing."""
     logger.debug("Copying new bids from multiprocessing proxy agents.")
