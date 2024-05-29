@@ -1,7 +1,7 @@
 [project]
 name = "cbba_sga"
 version = "0.0.1"
-dependencies = ["gurobipy>=11", "pydantic", "PyYaml", "matplotlib"]
+dependencies = ["gurobipy>=11", "pydantic", "PyYaml", "matplotlib", "scipy"]
 authors = [{ name = "Justin Whitaker", email = "justinwhtkr@gmail.com" }]
 description = "Implementations of CBBA and SGA"
 readme = "README.md"
@@ -50,6 +50,10 @@ show_error_codes = true
 
 [tool.pydocstyle]
 convention = "google"
+
+[tool.pylint.main]
+unsafe-load-any-extension="gurobipy"
+
 
 [tool.pytest.ini_options]
 minversion = "6.0"
