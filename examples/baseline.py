@@ -124,7 +124,7 @@ if __name__ == "__main__":
     logging.getLogger("matplotlib").setLevel(logging.WARNING)
 
     N = 20
-    MP = False
+    MP = True
 
     _tasks = [
         PositionTask(str(i), (random.uniform(-10, 10), random.uniform(-10, 10)))
@@ -172,7 +172,8 @@ if __name__ == "__main__":
     # # _coeffs = [0.0003, -0.0094, 0.1401, -0.5823]
     # _coeffs = [1.9e-6, 1.2e-5, 9.3e-4, -2.1e-2, 1.1e-1]
     # _approx = [
-    #     sum(coeff * val ** (len(_coeffs) - i - 1) for i, coeff in enumerate(_coeffs))
+    #     sum(coeff * val ** (len(_coeffs) - i - 1)
+    #     for i, coeff in enumerate(_coeffs))
     #     for val in _n_agents
     # ]
     # plt.plot(_n_agents, _sga_times)

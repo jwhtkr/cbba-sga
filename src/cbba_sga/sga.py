@@ -26,6 +26,19 @@ RT = typing.TypeVar("RT")
 class AgentProxy(agent.Agent[_DataT, None]):
     """A proxy that dispatches all calls to an agent in a process."""
 
+    __mp_attributes = {
+        "_agent",
+        "_agent_cls",
+        "_process",
+        "_conn",
+        "_recv_count",
+        "initialize_bids",
+        "task_bid",
+        "add_to_bundle",
+        "update_bids",
+        "_flush",
+    }
+
     def __init__(self, agent_: agent.Agent[_DataT, None]) -> None:
         """Initialize.
 
@@ -39,19 +52,14 @@ class AgentProxy(agent.Agent[_DataT, None]):
         self._process = mp.Process(
             target=class_worker.class_worker,
             args=(child_conn, self._agent_cls, self._agent.args, self._agent.kwargs),
+            daemon=True,
         )
         self._process.start()
-        self._recv_stack: typing.List[None] = []
-
-    @property
-    def done(self) -> bool:
-        self._flush()
-        self._conn.send((self._agent_cls.done.__get__, (), {}))
-        return typing.cast(bool, self._conn.recv())
+        self._recv_count = 0
 
     def initialize_bids(self) -> None:
         self._conn.send((self._agent_cls.initialize_bids, (), {}))
-        self._recv_stack.append(None)
+        self._recv_count += 1
 
     def task_bid(
         self, task_: task.Task[_DataT]
@@ -62,19 +70,18 @@ class AgentProxy(agent.Agent[_DataT, None]):
         out = self._conn.recv()
         return out
 
-    def add_to_bundle(self, task_: task.Task[_DataT]) -> None:
-        # TODO: implement
-        pass
+    def add_to_bundle(self, task_: task.Task[_DataT], bid: agent.Bid[_DataT]) -> None:
+        # We want to call the member agent's `add_to_bundle` here in order to
+        # locally track the bundle and path.
+        self._agent.add_to_bundle(task_, bid)
+        # But, we still need to send the call to the process so that it is also
+        # tracked in the "real" agent.
+        self._conn.send((self._agent_cls.add_to_bundle, (task_, bid), {}))
+        self._recv_count += 1
 
-    def _update_bids_task_assignments(
-        self, updated_tasks: typing.Iterable[task.Task[_DataT]]
-    ) -> None:
-        # TODO: implement
-        pass
-
-    def _update_bids_bundle_update(self) -> None:
-        # TODO: implement
-        pass
+    def update_bids(self, update_tasks: typing.List[task.Task[_DataT]]) -> None:
+        self._conn.send((self._agent_cls.update_bids, (update_tasks,), {}))
+        self._recv_count += 1
 
     def _flush(self) -> None:
         """Flush the unneeded received messages from the connection.
@@ -83,16 +90,30 @@ class AgentProxy(agent.Agent[_DataT, None]):
         the correct return value from the connection and/or are synchronized
         before moving on.
         """
-        for _ in self._recv_stack:
+        for _ in range(self._recv_count):
             self._conn.recv()
-        self._recv_stack.clear()
+        self._recv_count = 0
+
+    def __getattribute__(self, name: str) -> typing.Any:
+        if name.startswith("__") or name in AgentProxy.__mp_attributes:
+            return super().__getattribute__(name)
+        return self._agent.__getattribute__(name)
+
+    def __del__(self) -> None:
+        logger.debug(f"Cleaning up agent {self._agent.id}'s process")
+        self._conn.send(class_worker.STOP)
+        self._conn.recv()
+        self._process.join(0.1)
+        if self._process.is_alive():
+            self._process.terminate()
+        self._conn.close()
 
 
 def sga(
     agents: typing.Sequence[agent.Agent[_DataT, None]],
     tasks: typing.Sequence[task.Task[_DataT]],
     config_: SgaConfig,
-) -> None:
+) -> typing.List[agent.Agent[_DataT, None]]:
     """Assign tasks to agents using the SGA algorithm."""
     open_tasks = [task_ for task_ in tasks if task_.available]
     if config_.multiprocessing:
@@ -103,18 +124,15 @@ def sga(
 
     for _i in range(config_.max_iterations):
         logger.debug("SGA iteration %s", _i)
-        # TODO: Have select_best_assignment return the winning bid
-        # This will be in place of `score`. Then, the Agent class will receive
-        # the bid as an argument to the `add_to_bundle` method. This will reduce
-        # the number of calls to `task_bid`, and will enable tracking the bundle
-        # and path locally as well as in the agent's process.
         selection_result = select_best_assignment(agents, open_tasks)
-        score, selected_agent_idx, selected_task_idx, assignment_data = selection_result
+        selected_bid, selected_agent_idx, selected_task_idx, assignment_data = (
+            selection_result
+        )
 
         selected_agent = agents[selected_agent_idx]
         selected_task = open_tasks[selected_task_idx]
-        selected_task.assign_to(selected_agent.id, score, assignment_data)
-        selected_agent.add_to_bundle(selected_task)
+        selected_task.assign_to(selected_agent.id, selected_bid.value, assignment_data)
+        selected_agent.add_to_bundle(selected_task, selected_bid)
 
         for agent_ in agents:
             agent_.update_bids([selected_task])
@@ -129,14 +147,16 @@ def sga(
             logger.debug("No more available tasks. Stopping SGA.")
             break
 
+    return list(agents)
+
 
 def select_best_assignment(
     agents: typing.Sequence[agent.Agent[_DataT, None]],
     tasks: typing.Sequence[task.Task[_DataT]],
-) -> typing.Tuple[float, int, int, _DataT]:
+) -> typing.Tuple[agent.Bid[_DataT], int, int, _DataT]:
     """Select the best assignment to add to the SGA assignments."""
     logger.debug("Selecting the best assignment.")
-    score = -float("inf")
+    selected_bid: typing.Optional[agent.Bid[_DataT]] = None
     selected_agent_idx: int
     selected_task_idx: int
     assignment_data: _DataT
@@ -147,47 +167,21 @@ def select_best_assignment(
             bid, _ = agent_.task_bid(task_)
             if bid is None:
                 continue
-            if bid.value > score:
+            if selected_bid is None or bid.value > selected_bid.value:
                 logger.debug(
                     "The best assignment is updated to agent %s, task %s, and score %f",
                     agent_.id,
                     task_.id,
                     bid.value,
                 )
-                score = bid.value
+                selected_bid = bid
                 selected_agent_idx = agent_idx
                 selected_task_idx = task_idx
                 assignment_data = bid.data
+    if selected_bid is None:
+        raise RuntimeError(
+            "No valid bid was found. This usually means a task or agent is "
+            "not indicating it is done or unavailable properly."
+        )
 
-    return score, selected_agent_idx, selected_task_idx, assignment_data
-
-
-def update_scores(
-    args: typing.Tuple[agent.Agent[_DataT, None], task.Task[_DataT]]
-) -> agent.Agent[_DataT, None]:
-    """Wrap the agent score update functionality."""
-    agent_, selected_task = args
-    agent_.update_bids([selected_task])
-    return agent_
-
-
-def initialize_bids(agent_: agent.Agent[_DataT, None]) -> agent.Agent[_DataT, None]:
-    """Initialize the agents bids (wraps agent function for pickling)."""
-    agent_.initialize_bids()
-    return agent_
-
-
-def _update_agents_from_proxies(
-    agents: typing.Sequence[agent.Agent[_DataT, None]],
-    proxies: typing.Iterable[agent.Agent[_DataT, None]],
-) -> None:
-    """Update the agents to match the proxies from multiprocessing."""
-    logger.debug("Copying new bids from multiprocessing proxy agents.")
-    for agent_, proxy in zip(agents, proxies):
-        if agent_.id != proxy.id:
-            raise (
-                ValueError(
-                    "The order of the agents does not match the order of the proxies!"
-                )
-            )
-        agent_.curr_bids = proxy.curr_bids
+    return selected_bid, selected_agent_idx, selected_task_idx, assignment_data

@@ -78,29 +78,24 @@ class Agent(typing.Generic[DataT, CommsT]):  # pylint: disable=R0902
         self.path: typing.List[task.Task[DataT]] = []
         self.timestamps: typing.List[float] = []
         self.bids_are_dirty: bool = False
-        self.args: typing.Tuple[typing.Any]
+        self.args: typing.Tuple[typing.Any, ...]
         self.kwargs: typing.Dict[str, typing.Any]
         self._set_args_kwargs(id_, in_queue, out_queues, tasks)
+        self._task_id_to_idx = {task_.id: idx for idx, task_ in enumerate(tasks)}
 
     @property
     def done(self) -> bool:
         """Return true if the agent is done assigning tasks."""
         raise NotImplementedError
 
-    def add_to_bundle(self, task_: task.Task[DataT]) -> None:
+    def add_to_bundle(self, task_: task.Task[DataT], bid: Bid[DataT]) -> None:
         """Add a task (with its data) to the agent's bundle."""
         if self.done:
             raise RuntimeError(
                 "An attempt was made to add a task to an agent that is done."
             )
-
-        bid, my_task = self.task_bid(task_)
-        if bid is None:
-            raise ValueError(
-                f"Task {task_.id} is not a valid task to add to agent "
-                f"{self.id}'s bundle at this time."
-            )
         logger.debug("Adding task %s to agent %s's bundle and path.", task_.id, self.id)
+        my_task = self.get_task(task_.id)
         my_task.assign_to(self.id, bid.value, bid.data)
         self.path.insert(bid.path_idx, my_task)
         self.bundle.append(my_task)
@@ -115,10 +110,23 @@ class Agent(typing.Generic[DataT, CommsT]):  # pylint: disable=R0902
         self, task_: task.Task[DataT]
     ) -> typing.Tuple[typing.Optional[Bid[DataT]], task.Task[DataT]]:
         """Retrieve the bid for a task."""
-        for _bid, _task in zip(self.curr_bids, self.winning_assignments):
-            if _task.id == task_.id:
-                return _bid, _task
-        raise RuntimeError(f"Task {task_.id} could not be found for agent {self.id}")
+        try:
+            idx = self._task_id_to_idx[task_.id]
+        except ValueError as err:
+            raise ValueError(
+                f"Task {task_.id} was not found for agent {self.id}"
+            ) from err
+        return self.curr_bids[idx], self.winning_assignments[idx]
+
+    def get_task(self, task_id: str) -> task.Task[DataT]:
+        """Get the task from the given ID."""
+        try:
+            idx = self._task_id_to_idx[task_id]
+        except ValueError as err:
+            raise ValueError(
+                f"Task {task_id} was not found for agent {self.id}"
+            ) from err
+        return self.winning_assignments[idx]
 
     def update_bids(self, update_tasks: typing.List[task.Task[DataT]]) -> None:
         """Update the bids of this agent based on the updated tasks."""

@@ -1,5 +1,6 @@
 """Test using optimization for per-agent scoring and multiprocessing speed."""
 
+import random
 import typing
 
 import gurobipy as gp
@@ -25,6 +26,7 @@ def build_model(
     points: npt.NDArray[np.float64],
     utilities: npt.NDArray[np.float64],
     max_points: int,
+    env: gp.Env = gp.Env(),
 ) -> gp.Model:
     """Build a Gurobi model of the single-agent problem."""
     if points.shape[0] != utilities.shape[0]:
@@ -40,7 +42,7 @@ def build_model(
     )  # type:ignore[assignment]
     # print(f"Start distances: {start_dists}")
 
-    model = gp.Model()
+    model = gp.Model(env=env)
     model.params.LogToConsole = 0
 
     # Create model variables (with objective coefficients)
@@ -129,13 +131,18 @@ class PositionAgent(agent.Agent[None, None]):
         self.bundle: typing.List[PositionTask]  # type: ignore[assignment]
         self.path: typing.List[PositionTask]  # type: ignore[assignment]
         self.winning_assignments: typing.List[PositionTask]
+        self._env = gp.Env(
+            params={"LogToConsole": 0, "LogFile": f"agent_{self.id}.log"}
+        )
         self._model = build_model(
             np.array(self.position),
             np.array([task_.position for task_ in tasks]),
             np.array([task_.value for task_ in tasks]),
             self.max_tasks,
+            env=self._env,
         )
-        self._model.params.LogFile = f"agent_{id_}.log"
+        self._model.update()
+        self._set_args_kwargs(id_, tasks, position, max_tasks)
 
     @property
     def done(self) -> bool:
@@ -145,18 +152,14 @@ class PositionAgent(agent.Agent[None, None]):
         self.curr_bids = [None] * len(self.winning_assignments)
         self._calculate_bids()
 
-    def add_to_bundle(self, task_: task.Task[None]) -> None:
+    def add_to_bundle(self, task_: task.Task[None], bid: agent.Bid[None]) -> None:
         # Call base class to add task_ to bundle and path appropriately
-        super().add_to_bundle(task_)
+        super().add_to_bundle(task_, bid)
 
+        path_idx = min(bid.path_idx, len(self.path))
         # Add constraints for the newly added task_ to respect the path order
-        bid_, _ = self.task_bid(task_)
-        if bid_ is None:
-            raise RuntimeError("This shouldn't be possible")
-        task_before = self.path[bid_.path_idx - 1] if bid_.path_idx > 0 else None
-        task_after = (
-            self.path[bid_.path_idx + 1] if bid_.path_idx < len(self.path) - 1 else None
-        )
+        task_before = self.path[path_idx - 1] if path_idx > 0 else None
+        task_after = self.path[path_idx + 1] if path_idx < len(self.path) - 1 else None
         if task_before is not None:
             self._add_ordering_constraint(task_before, task_)
         if task_after is not None:
@@ -181,7 +184,6 @@ class PositionAgent(agent.Agent[None, None]):
                         self.bids_are_dirty = True
 
     def _update_bids_bundle_update(self) -> None:
-        # TODO: update here
         self._calculate_bids()
 
     def _calculate_bids(self) -> None:
@@ -256,11 +258,11 @@ if __name__ == "__main__":
 
     from cbba_sga import sga
 
-    np.random.seed(42)
+    random.seed(42)
 
-    _n_tasks = 8
+    _n_tasks = 10
     _n_agents = 4
-    MP = False
+    MP = True
 
     logging.basicConfig(
         level=logging.DEBUG, filename=f"{os.curdir}/opt_test.log", filemode="w"
@@ -269,12 +271,12 @@ if __name__ == "__main__":
     logging.getLogger("matplotlib").setLevel(logging.WARNING)
 
     _tasks = [
-        PositionTask(str(i), tuple(np.random.uniform(-10, 10, (2,)).tolist()), 30.0)
+        PositionTask(str(i), (random.uniform(-10, 10), random.uniform(-10, 10)), 30.0)
         for i in range(_n_tasks)
     ]
     _agents = [
         PositionAgent(
-            str(i), _tasks, tuple(np.random.uniform(-10, 10, (2,)).tolist()), 3
+            str(i), _tasks, (random.uniform(-10, 10), random.uniform(-10, 10)), 3
         )
         for i in range(_n_agents)
     ]
