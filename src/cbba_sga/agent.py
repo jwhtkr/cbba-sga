@@ -78,6 +78,9 @@ class Agent(typing.Generic[DataT, CommsT]):  # pylint: disable=R0902
         self.path: typing.List[task.Task[DataT]] = []
         self.timestamps: typing.List[float] = []
         self.bids_are_dirty: bool = False
+        self.args: typing.Tuple[typing.Any]
+        self.kwargs: typing.Dict[str, typing.Any]
+        self._set_args_kwargs(id_, in_queue, out_queues, tasks)
 
     @property
     def done(self) -> bool:
@@ -108,6 +111,15 @@ class Agent(typing.Generic[DataT, CommsT]):  # pylint: disable=R0902
         """Initialize the bids for all of the tasks."""
         raise NotImplementedError
 
+    def task_bid(
+        self, task_: task.Task[DataT]
+    ) -> typing.Tuple[typing.Optional[Bid[DataT]], task.Task[DataT]]:
+        """Retrieve the bid for a task."""
+        for _bid, _task in zip(self.curr_bids, self.winning_assignments):
+            if _task.id == task_.id:
+                return _bid, _task
+        raise RuntimeError(f"Task {task_.id} could not be found for agent {self.id}")
+
     def update_bids(self, update_tasks: typing.List[task.Task[DataT]]) -> None:
         """Update the bids of this agent based on the updated tasks."""
         logger.debug("Updating bids of agent %s.", self.id)
@@ -126,14 +138,14 @@ class Agent(typing.Generic[DataT, CommsT]):  # pylint: disable=R0902
         """Update the bids based on task assignments being updated."""
         raise NotImplementedError
 
-    def task_bid(
-        self, task_: task.Task[DataT]
-    ) -> typing.Tuple[typing.Optional[Bid[DataT]], task.Task[DataT]]:
-        """Retrieve the bid for a task."""
-        for _bid, _task in zip(self.curr_bids, self.winning_assignments):
-            if _task.id == task_.id:
-                return _bid, _task
-        raise RuntimeError(f"Task {task_.id} could not be found for agent {self.id}")
+    def _set_args_kwargs(
+        self,
+        *args: typing.Any,
+        **kwargs: typing.Any,
+    ) -> None:
+        """Save the args and kwargs used to instantiate the class."""
+        self.args = args
+        self.kwargs = kwargs
 
     def __str__(self) -> str:
         return f"{self.__class__.__name__}(id={self.id})"

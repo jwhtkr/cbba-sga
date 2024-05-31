@@ -33,6 +33,7 @@ class PositionAgent(agent.Agent[None, None]):
         self.bundle: typing.List[PositionTask]  # type: ignore[assignment]
         self.path: typing.List[PositionTask]  # type: ignore[assignment]
         self.winning_assignments: typing.List[PositionTask]
+        self._set_args_kwargs(id_, tasks, position, lambda_, max_tasks)
 
     @property
     def done(self) -> bool:

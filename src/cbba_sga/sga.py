@@ -1,10 +1,10 @@
 """Implement the SGA algorithm."""
 
-import itertools
 import logging
+import multiprocessing as mp
 import typing
 
-from cbba_sga import agent, config, pool, task
+from cbba_sga import agent, class_worker, config, task
 
 
 logger = logging.getLogger(__name__)
@@ -23,6 +23,71 @@ T = typing.TypeVar("T")
 RT = typing.TypeVar("RT")
 
 
+class AgentProxy(agent.Agent[_DataT, None]):
+    """A proxy that dispatches all calls to an agent in a process."""
+
+    def __init__(self, agent_: agent.Agent[_DataT, None]) -> None:
+        """Initialize.
+
+        Args:
+            agent_: The agent for which this class will be proxy.
+        """
+        self._agent = agent_
+        self._agent_cls = type(agent_)
+        parent_conn, child_conn = mp.Pipe()
+        self._conn = parent_conn
+        self._process = mp.Process(
+            target=class_worker.class_worker,
+            args=(child_conn, self._agent_cls, self._agent.args, self._agent.kwargs),
+        )
+        self._process.start()
+        self._recv_stack: typing.List[None] = []
+
+    @property
+    def done(self) -> bool:
+        self._flush()
+        self._conn.send((self._agent_cls.done.__get__, (), {}))
+        return typing.cast(bool, self._conn.recv())
+
+    def initialize_bids(self) -> None:
+        self._conn.send((self._agent_cls.initialize_bids, (), {}))
+        self._recv_stack.append(None)
+
+    def task_bid(
+        self, task_: task.Task[_DataT]
+    ) -> typing.Tuple[typing.Optional[agent.Bid[_DataT]], task.Task[_DataT]]:
+        self._flush()
+        self._conn.send((self._agent_cls.task_bid, (task_,), {}))
+        out: typing.Tuple[typing.Optional[agent.Bid[_DataT]], task.Task[_DataT]]
+        out = self._conn.recv()
+        return out
+
+    def add_to_bundle(self, task_: task.Task[_DataT]) -> None:
+        # TODO: implement
+        pass
+
+    def _update_bids_task_assignments(
+        self, updated_tasks: typing.Iterable[task.Task[_DataT]]
+    ) -> None:
+        # TODO: implement
+        pass
+
+    def _update_bids_bundle_update(self) -> None:
+        # TODO: implement
+        pass
+
+    def _flush(self) -> None:
+        """Flush the unneeded received messages from the connection.
+
+        Use to ensure that synchronous functions (e.g., with return values) get
+        the correct return value from the connection and/or are synchronized
+        before moving on.
+        """
+        for _ in self._recv_stack:
+            self._conn.recv()
+        self._recv_stack.clear()
+
+
 def sga(
     agents: typing.Sequence[agent.Agent[_DataT, None]],
     tasks: typing.Sequence[task.Task[_DataT]],
@@ -30,33 +95,29 @@ def sga(
 ) -> None:
     """Assign tasks to agents using the SGA algorithm."""
     open_tasks = [task_ for task_ in tasks if task_.available]
-    mp_pool = None if not config_.multiprocessing else pool.SmartPool()
+    if config_.multiprocessing:
+        agents = [AgentProxy(agent_) for agent_ in agents]
 
-    if mp_pool is not None:
-        proxy_agents = mp_pool.map(initialize_bids, agents)
-        _update_agents_from_proxies(agents, proxy_agents)
-    else:
-        list(map(initialize_bids, agents))
+    for agent_ in agents:
+        agent_.initialize_bids()
 
     for _i in range(config_.max_iterations):
         logger.debug("SGA iteration %s", _i)
+        # TODO: Have select_best_assignment return the winning bid
+        # This will be in place of `score`. Then, the Agent class will receive
+        # the bid as an argument to the `add_to_bundle` method. This will reduce
+        # the number of calls to `task_bid`, and will enable tracking the bundle
+        # and path locally as well as in the agent's process.
         selection_result = select_best_assignment(agents, open_tasks)
         score, selected_agent_idx, selected_task_idx, assignment_data = selection_result
+
         selected_agent = agents[selected_agent_idx]
         selected_task = open_tasks[selected_task_idx]
         selected_task.assign_to(selected_agent.id, score, assignment_data)
         selected_agent.add_to_bundle(selected_task)
 
-        update_scores_zip = zip(agents, itertools.repeat(selected_task))
-        if mp_pool is not None:
-            proxy_agents = mp_pool.imap(
-                update_scores,
-                update_scores_zip,
-                config_.chunk_size,
-            )
-            _update_agents_from_proxies(agents, proxy_agents)
-        else:
-            list(map(update_scores, update_scores_zip))
+        for agent_ in agents:
+            agent_.update_bids([selected_task])
 
         if not selected_task.available:
             logger.debug("Removing task %s from the open tasks.", selected_task.id)
@@ -67,10 +128,6 @@ def sga(
         if not open_tasks:
             logger.debug("No more available tasks. Stopping SGA.")
             break
-
-    if mp_pool is not None:
-        logger.debug("Stopping the multiprocessing pool.")
-        mp_pool.stop()
 
 
 def select_best_assignment(
