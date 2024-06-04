@@ -36,11 +36,9 @@ def build_model(
     dist_mat += np.diag(
         np.ones_like(utilities) * (dist_mat.max() + utilities.max()) * 10
     )
-    # print(f"Point distances:\n{dist_mat}")
     start_dists: npt.NDArray[np.float64] = np.linalg.norm(
         start_pos[np.newaxis, :] - points, axis=1
-    )  # type:ignore[assignment]
-    # print(f"Start distances: {start_dists}")
+    )
 
     model = gp.Model(env=env)
     model.params.LogToConsole = 0
