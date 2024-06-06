@@ -124,7 +124,7 @@ if __name__ == "__main__":
     logging.getLogger("matplotlib").setLevel(logging.WARNING)
 
     N = 20
-    MP = True
+    MP = False
 
     _tasks = [
         PositionTask(str(i), (random.uniform(-10, 10), random.uniform(-10, 10)))

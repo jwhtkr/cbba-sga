@@ -130,7 +130,11 @@ class PositionAgent(agent.Agent[None, None]):
         self.path: typing.List[PositionTask]  # type: ignore[assignment]
         self.winning_assignments: typing.List[PositionTask]
         self._env = gp.Env(
-            params={"LogToConsole": 0, "LogFile": f"agent_{self.id}.log"}
+            params={
+                "LogToConsole": 0,
+                "LogFile": f"agent_{self.id}.log",
+                "TimeLimit": 3,
+            }
         )
         self._model = build_model(
             np.array(self.position),
